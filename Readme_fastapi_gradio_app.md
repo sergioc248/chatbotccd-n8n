@@ -19,6 +19,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Abre `http://localhost:8000`.
+Si quieres abrir la interfaz Gradio en Azure, usa `http://130.107.49.127:8000/?__theme=light`.
+Si quieres servirlo por HTTP en el puerto 80, define `APP_PORT=80` antes de levantar Docker Compose o cambia el mapeo de puertos a `80:8000`.
 
 También puedes ejecutarlo directamente:
 
@@ -67,20 +69,18 @@ docker compose up -d --build
 docker compose logs -f app
 ```
 
-Abre `http://localhost:8000`. Para detener: `docker compose down`.
+Abre `http://localhost` si usas el puerto 80. Para detener: `docker compose down`.
 
-En un VPS detrás de Nginx, enlaza solo en localhost editando `docker-compose.yml`:
+En Azure, no necesitas Nginx: configura las reglas de red para permitir el tráfico entrante y saliente en el puerto que expone la app (por ejemplo, `80` o `8000`):
 
-```yaml
-ports:
-  - "127.0.0.1:8000:8000"
-```
+- **Entrada**: permite TCP desde Internet hacia el puerto publicado.
+- **Salida**: permite las conexiones salientes necesarias para n8n y otros servicios externos.
 
 ### Docker sin Compose
 
 ```bash
 docker build -t tunavegante-ccd .
-docker run --rm -p 8000:8000 \
+docker run --rm -p 80:8000 \
   -e N8N_WEBHOOK_URL="https://n8n.tudominio.com/webhook/tu-chat-trigger" \
   tunavegante-ccd
 ```

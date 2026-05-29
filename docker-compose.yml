@@ -5,7 +5,7 @@ services:
     container_name: tunavegante-ccd
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "${APP_PORT:-80}:8000"
     env_file:
       - .env
     environment:

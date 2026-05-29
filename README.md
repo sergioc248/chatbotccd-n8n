@@ -586,6 +586,14 @@ WHERE metadata->>'source' = 'reglamento_ccd_2024.pdf';
 
 ## 🚀 Despliegue
 
+### FastAPI + Gradio en Azure
+
+Si estás publicando la interfaz FastAPI + Gradio en Azure, puedes abrirla en:
+
+`http://130.107.49.127:8000/?__theme=light`
+
+No necesitas Nginx; solo asegúrate de configurar las reglas de red para permitir el tráfico entrante y saliente en el puerto expuesto por la app (por ejemplo, `8000` o `80`).
+
 ### Opción A: Servidor Propio (VPS)
 
 ```bash
