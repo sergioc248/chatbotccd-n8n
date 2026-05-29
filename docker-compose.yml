@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    image: tunavegante-ccd:latest
+    image: sergiodannaregistry.azurecr.io/chatbotccd:2.0
     container_name: tunavegante-ccd
     restart: unless-stopped
     ports:

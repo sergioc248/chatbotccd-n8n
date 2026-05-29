@@ -1,6 +1,6 @@
 # 🎓 TuNaveganteCCD — Asistente Virtual del Centro de Competencias Digitales UNAB
 
-> Chatbot conversacional de IA que guía a los estudiantes de la Universidad Autónoma de Bucaramanga (UNAB) a través de su Ruta de Competencias Digitales. Combina un **agente inteligente con memoria, herramientas y RAG** orquestado en **n8n Cloud**, con un **frontend web FastAPI + Gradio (PWA)** desplegado en una **máquina virtual de Azure**.
+> Chatbot conversacional de IA que guía a los estudiantes de la Universidad Autónoma de Bucaramanga (UNAB) a través de su Ruta de Competencias Digitales. Combina un **agente inteligente con memoria, herramientas y RAG** orquestado en **n8n Cloud**, con un **frontend web FastAPI + Gradio (PWA)** desplegado en **Azure** (máquina virtual y, en su versión con dominio y HTTPS, Azure Web Apps sobre contenedor).
 
 ---
 
@@ -102,7 +102,7 @@ El estudiante interactúa a través de una **web app FastAPI + Gradio** (con sop
 
 | Capa | Implementación | Hosting |
 |---|---|---|
-| Frontend | FastAPI + Gradio (PWA), `main.py` | Azure Virtual Machine |
+| Frontend | FastAPI + Gradio (PWA), `main.py` | Azure VM y Azure Web Apps (contenedor vía ACR) |
 | Orquestación / Agente | Workflow `CCD Bot IngenioTIC` + sub-workflow `CCD - Consulta Base de Datos` | n8n Cloud |
 | Bases de datos | PostgreSQL `cosmos` (institucional) y `n8n_ccd` (chatbot + RAG) | Neon (serverless Postgres) |
 
@@ -406,6 +406,179 @@ docker compose up -d --build      # publica :8000
 ```
 
 Si más adelante quieres TLS, puedes añadir **Nginx** como proxy inverso: enlaza la app solo a localhost (`127.0.0.1:8000:8000`) y expón HTTPS en el proxy, ajustando las reglas del **Network Security Group**.
+
+### Frontend en Azure Web Apps (contenedor) — paso a paso
+
+Además del despliegue directo en la VM, existe una **segunda versión** publicada con **Azure Web Apps** (App Service for Containers). Esta opción habilita **HTTPS gestionado** y un **dominio personalizado** sin configurar Nginx ni reglas de red manualmente. El contenedor se **buildea en local**, se sube a un **Azure Container Registry (ACR)** y la Web App lo ejecuta desde ahí.
+
+**URL actual:**
+
+`https://chatbot-ccd-webapp.azurewebsites.net/?__theme=light`
+
+#### Prerrequisitos
+
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az`) y Docker instalados en local.
+- Una suscripción de Azure con permisos para crear recursos.
+- El `Dockerfile` del proyecto (que ejecuta `uvicorn main:app --host 0.0.0.0 --port 8000`).
+
+#### Paso 0 — Variables de trabajo
+
+Define estos valores una vez y reutilízalos en los comandos (ajusta nombres/región a tu suscripción; el nombre del ACR debe ser **globalmente único** y solo minúsculas/números):
+
+```bash
+RESOURCE_GROUP="rg-chatbot-ccd"
+LOCATION="eastus"
+ACR_NAME="acrchatbotccd"                 # → acrchatbotccd.azurecr.io
+APP_PLAN="plan-chatbot-ccd"
+WEBAPP_NAME="chatbot-ccd-webapp"         # → https://chatbot-ccd-webapp.azurewebsites.net
+IMAGE="chatbot-ccd-webapp"
+TAG="latest"
+```
+
+#### Paso 1 — Iniciar sesión y crear el grupo de recursos
+
+```bash
+az login
+az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
+```
+
+#### Paso 2 — Crear el Azure Container Registry (ACR)
+
+```bash
+az acr create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$ACR_NAME" \
+  --sku Basic \
+  --admin-enabled true
+```
+
+> `--admin-enabled true` simplifica que la Web App haga pull con usuario/clave del registro. Para producción se recomienda usar **identidad administrada** en lugar de credenciales admin (ver Paso 6, alternativa).
+
+#### Paso 3 — Buildear la imagen en local y subirla al ACR
+
+```bash
+# Autenticación de Docker contra el registro
+az acr login --name "$ACR_NAME"
+
+# Build local del contenedor (desde la raíz del proyecto, donde está el Dockerfile)
+docker build -t "$IMAGE:$TAG" .
+
+# Etiquetar hacia el ACR y empujar la imagen
+docker tag "$IMAGE:$TAG" "$ACR_NAME.azurecr.io/$IMAGE:$TAG"
+docker push "$ACR_NAME.azurecr.io/$IMAGE:$TAG"
+```
+
+> En Mac/Windows con chips ARM, fuerza la arquitectura de App Service (linux/amd64):
+> `docker build --platform linux/amd64 -t "$IMAGE:$TAG" .`
+
+Verifica que la imagen quedó en el registro:
+
+```bash
+az acr repository show-tags --name "$ACR_NAME" --repository "$IMAGE" --output table
+```
+
+#### Paso 4 — Crear el App Service Plan (Linux)
+
+```bash
+az appservice plan create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_PLAN" \
+  --is-linux \
+  --sku B1
+```
+
+#### Paso 5 — Crear la Web App apuntando a la imagen del ACR
+
+```bash
+az webapp create \
+  --resource-group "$RESOURCE_GROUP" \
+  --plan "$APP_PLAN" \
+  --name "$WEBAPP_NAME" \
+  --container-image-name "$ACR_NAME.azurecr.io/$IMAGE:$TAG"
+```
+
+#### Paso 6 — Conectar la Web App con el ACR
+
+```bash
+# Con credenciales admin del registro (rápido)
+ACR_USER=$(az acr credential show --name "$ACR_NAME" --query username --output tsv)
+ACR_PASS=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].value" --output tsv)
+
+az webapp config container set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$WEBAPP_NAME" \
+  --container-image-name "$ACR_NAME.azurecr.io/$IMAGE:$TAG" \
+  --container-registry-url "https://$ACR_NAME.azurecr.io" \
+  --container-registry-user "$ACR_USER" \
+  --container-registry-password "$ACR_PASS"
+```
+
+> **Alternativa recomendada (sin contraseñas):** habilita una identidad administrada en la Web App y otórgale el rol `AcrPull` sobre el registro:
+> ```bash
+> az webapp identity assign --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+> PRINCIPAL_ID=$(az webapp identity show -g "$RESOURCE_GROUP" -n "$WEBAPP_NAME" --query principalId -o tsv)
+> ACR_ID=$(az acr show -n "$ACR_NAME" --query id -o tsv)
+> az role assignment create --assignee "$PRINCIPAL_ID" --scope "$ACR_ID" --role AcrPull
+> ```
+
+#### Paso 7 — Configurar puerto y variables de entorno
+
+La app escucha en el puerto `8000`, así que se lo indicamos a App Service con `WEBSITES_PORT`. Aquí también van las variables del frontend (apuntando al webhook de n8n Cloud):
+
+```bash
+az webapp config appsettings set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$WEBAPP_NAME" \
+  --settings \
+    WEBSITES_PORT=8000 \
+    N8N_WEBHOOK_URL="https://<tenant>.app.n8n.cloud/webhook/<id>" \
+    N8N_TIMEOUT_SECONDS=60 \
+    UNAB_LOGO_URL="https://upload.wikimedia.org/wikipedia/commons/d/de/LogoUnab.png"
+```
+
+#### Paso 8 — Reiniciar y verificar
+
+```bash
+az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+
+# Logs en vivo del contenedor
+az webapp log tail --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+```
+
+Abre en el navegador:
+
+`https://chatbot-ccd-webapp.azurewebsites.net/?__theme=light`
+
+Azure Web Apps sirve TLS automáticamente sobre el dominio `*.azurewebsites.net`. El parámetro `?__theme=light` fuerza el tema claro institucional, igual que en la VM.
+
+#### Paso 9 — (Opcional) Dominio personalizado + certificado gestionado
+
+```bash
+# 1) Añadir el dominio (requiere validación DNS: CNAME al *.azurewebsites.net + TXT asuid)
+az webapp config hostname add \
+  --resource-group "$RESOURCE_GROUP" \
+  --webapp-name "$WEBAPP_NAME" \
+  --hostname "chatbot.tudominio.edu.co"
+
+# 2) Emitir y enlazar un certificado gestionado gratuito (SNI SSL)
+az webapp config ssl create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$WEBAPP_NAME" \
+  --hostname "chatbot.tudominio.edu.co"
+```
+
+#### Re-despliegue de nuevas versiones
+
+Tras cambios en el código, reconstruye y empuja la imagen, luego reinicia la Web App:
+
+```bash
+docker build -t "$ACR_NAME.azurecr.io/$IMAGE:$TAG" .
+docker push "$ACR_NAME.azurecr.io/$IMAGE:$TAG"
+az webapp restart --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+```
+
+> Con un tag fijo (`latest`) conviene habilitar el pull continuo para que la Web App tome la imagen nueva automáticamente:
+> `az webapp deployment container config --enable-cd true -g "$RESOURCE_GROUP" -n "$WEBAPP_NAME"`
 
 ### Backend en n8n Cloud
 
