@@ -28,6 +28,17 @@ UNAB_LOGO_URL = os.getenv(
     "https://upload.wikimedia.org/wikipedia/commons/d/de/LogoUnab.png",
 )
 
+RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
+
+
+def _load_resource_bytes(filename: str) -> bytes:
+    with open(os.path.join(RESOURCES_DIR, filename), "rb") as handle:
+        return handle.read()
+
+
+PWA_ICON_192_PNG = _load_resource_bytes("logo_unab_192.png")
+PWA_ICON_512_PNG = _load_resource_bytes("logo_unab_512.png")
+
 SLASH_COMMANDS: list[dict[str, str]] = [
     {"cmd": "/inicio", "desc": "Bienvenida e información general del CCD"},
     {"cmd": "/ayuda", "desc": "Lista completa de comandos con ejemplos"},
@@ -74,16 +85,28 @@ async def pwa_manifest() -> JSONResponse:
             "categories": ["education", "productivity"],
             "icons": [
                 {
-                    "src": "/pwa-icon-192.svg",
+                    "src": "/pwa-icon-192.png",
                     "sizes": "192x192",
-                    "type": "image/svg+xml",
-                    "purpose": "any maskable",
+                    "type": "image/png",
+                    "purpose": "any",
                 },
                 {
-                    "src": "/pwa-icon-512.svg",
+                    "src": "/pwa-icon-512.png",
                     "sizes": "512x512",
-                    "type": "image/svg+xml",
-                    "purpose": "any maskable",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/pwa-icon-192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "maskable",
+                },
+                {
+                    "src": "/pwa-icon-512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "maskable",
                 },
             ],
         },
@@ -92,31 +115,21 @@ async def pwa_manifest() -> JSONResponse:
     )
 
 
-def _pwa_icon_svg(size: int) -> str:
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 512 512" role="img" aria-label="{APP_TITLE}">
-  <rect width="512" height="512" rx="112" fill="{PWA_THEME_COLOR}"/>
-  <path d="M112 128h288v256H112z" fill="#ffffff" opacity="0.96"/>
-  <path d="M144 166h224v28H144zM144 224h168v28H144zM144 282h224v28H144z" fill="#0e2140"/>
-  <circle cx="370" cy="360" r="62" fill="#0058a8"/>
-  <path d="M348 360l16 16 32-38" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>"""
-
-
-@app.get("/pwa-icon-192.svg", include_in_schema=False)
+@app.get("/pwa-icon-192.png", include_in_schema=False)
 async def pwa_icon_192() -> Response:
     return Response(
-        content=_pwa_icon_svg(192),
+        content=PWA_ICON_192_PNG,
         headers={"Cache-Control": "public, max-age=86400"},
-        media_type="image/svg+xml",
+        media_type="image/png",
     )
 
 
-@app.get("/pwa-icon-512.svg", include_in_schema=False)
+@app.get("/pwa-icon-512.png", include_in_schema=False)
 async def pwa_icon_512() -> Response:
     return Response(
-        content=_pwa_icon_svg(512),
+        content=PWA_ICON_512_PNG,
         headers={"Cache-Control": "public, max-age=86400"},
-        media_type="image/svg+xml",
+        media_type="image/png",
     )
 
 
@@ -124,8 +137,8 @@ async def pwa_icon_512() -> Response:
 async def service_worker() -> Response:
     return Response(
         content=f"""
-const CACHE_NAME = '{APP_TITLE.lower()}-pwa-v1';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/pwa-icon-192.svg', '/pwa-icon-512.svg'];
+const CACHE_NAME = '{APP_TITLE.lower()}-pwa-v3';
+const APP_SHELL = ['/', '/manifest.webmanifest', '/pwa-icon-192.png', '/pwa-icon-512.png'];
 
 self.addEventListener('install', function (event) {{
   event.waitUntil(
@@ -382,6 +395,67 @@ body, .gradio-container {
   border-color: var(--border);
   color: var(--green);
   cursor: default;
+}
+
+.pwa-install-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(14, 33, 64, 0.55);
+}
+
+.pwa-install-dialog {
+  width: min(420px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: 0 18px 48px rgba(14, 33, 64, 0.28);
+  padding: 24px;
+}
+
+.pwa-install-dialog-title {
+  margin: 0 0 16px;
+  font-family: 'IBM Plex Sans', sans-serif !important;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.pwa-install-dialog-steps {
+  margin: 0 0 20px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text-1);
+}
+
+.pwa-install-dialog-close {
+  width: 100%;
+  min-height: 42px;
+  border-radius: var(--r);
+  border: 1px solid var(--red);
+  background: var(--red);
+  color: #ffffff;
+  font-family: 'IBM Plex Sans', sans-serif !important;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pwa-install-dialog-close:hover {
+  background: var(--red-dk);
+  border-color: var(--red-dk);
 }
 
 .hero-unit {
@@ -921,7 +995,7 @@ _PWA_HEAD = f"""
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="{APP_TITLE}">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="apple-touch-icon" href="/pwa-icon-192.svg">
+<link rel="apple-touch-icon" href="/pwa-icon-192.png">
 """
 
 _HERO_HTML = f"""
@@ -1209,6 +1283,14 @@ _PWA_INSTALL_JS = """
       window.navigator.standalone === true;
   }
 
+  function isIOS() {
+    const ua = window.navigator.userAgent || '';
+    const iOSDevice = /iPad|iPhone|iPod/.test(ua);
+    // iPadOS 13+ reports as Mac but exposes touch support.
+    const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+    return iOSDevice || iPadOS;
+  }
+
   function setInstalledState() {
     if (!installButton) return;
     installButton.textContent = 'App instalada';
@@ -1223,6 +1305,85 @@ _PWA_INSTALL_JS = """
     installButton.disabled = false;
     installButton.classList.remove('is-installed');
     installButton.setAttribute('aria-label', 'Descargar TuNaveganteCCD como aplicación');
+  }
+
+  function buildInstructions() {
+    if (isIOS()) {
+      return {
+        title: 'Instalar en iPhone o iPad',
+        steps: [
+          'Abre esta página en Safari (no en otra app).',
+          'Toca el botón Compartir (el cuadro con la flecha hacia arriba).',
+          'Elige "Añadir a pantalla de inicio".',
+          'Confirma con "Añadir" y abre TuNaveganteCCD desde tu pantalla de inicio.'
+        ]
+      };
+    }
+    return {
+      title: 'Instalar la app',
+      steps: [
+        'Abre el menú del navegador (los tres puntos ⋮).',
+        'Elige "Instalar app" o "Añadir a pantalla de inicio".',
+        'Confirma la instalación y abre TuNaveganteCCD como aplicación.'
+      ]
+    };
+  }
+
+  function closeInstructions() {
+    const overlay = document.getElementById('pwa-install-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  function showInstructions() {
+    closeInstructions();
+
+    const info = buildInstructions();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pwa-install-overlay';
+    overlay.className = 'pwa-install-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', info.title);
+
+    const dialog = document.createElement('div');
+    dialog.className = 'pwa-install-dialog';
+
+    const heading = document.createElement('h2');
+    heading.className = 'pwa-install-dialog-title';
+    heading.textContent = info.title;
+
+    const list = document.createElement('ol');
+    list.className = 'pwa-install-dialog-steps';
+    info.steps.forEach(function (step) {
+      const item = document.createElement('li');
+      item.textContent = step;
+      list.appendChild(item);
+    });
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'pwa-install-dialog-close';
+    close.textContent = 'Entendido';
+    close.addEventListener('click', closeInstructions);
+
+    dialog.appendChild(heading);
+    dialog.appendChild(list);
+    dialog.appendChild(close);
+    overlay.appendChild(dialog);
+
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) closeInstructions();
+    });
+    document.addEventListener('keydown', function onKey(event) {
+      if (event.key === 'Escape') {
+        closeInstructions();
+        document.removeEventListener('keydown', onKey);
+      }
+    });
+
+    document.body.appendChild(overlay);
+    close.focus();
   }
 
   function attachInstallButton() {
@@ -1245,10 +1406,11 @@ _PWA_INSTALL_JS = """
         return;
       }
 
+      // The native prompt is only available on Chromium browsers that fired
+      // `beforeinstallprompt`. iOS and any browser without it get clear
+      // step-by-step instructions instead of a dead button.
       if (!deferredInstallPrompt) {
-        window.alert(
-          'Si el navegador no abre la instalación automáticamente, usa el menú del navegador y elige "Instalar app" o "Añadir a pantalla de inicio".'
-        );
+        showInstructions();
         return;
       }
 
