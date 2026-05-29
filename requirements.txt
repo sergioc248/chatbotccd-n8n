@@ -1,0 +1,6 @@
+fastapi
+gradio
+httpx
+pydantic
+python-dotenv
+uvicorn[standard]
